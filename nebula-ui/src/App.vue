@@ -1,13 +1,30 @@
 <template>
   <div id="app">
-    <img src="./assets/logo.png">
+    <Menu mode="horizontal" theme="light" @on-select="changeRoute">
+      <MenuItem name="stroke"> <Icon type="ios-paper" />笔画</MenuItem>
+    </Menu>
     <router-view/>
   </div>
 </template>
 
 <script>
+import Stroke from '@/components/stroke'
 export default {
-  name: 'App'
+  name: 'App',
+  methods: {
+    changeRoute: function (routeName) {
+      console.log(this.routeMap[routeName])
+      this.$router.push(this.routeMap[routeName])
+    }
+  },
+  data () {
+    return {
+      routeMap: {
+        'stroke': '/stroke'
+      }
+    }
+  },
+  components: { Stroke }
 }
 </script>
 

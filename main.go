@@ -15,6 +15,8 @@ import (
 	"database/sql"
 	_ "github.com/lib/pq"
 	"regexp"
+	"path/filepath"
+    "os"
 )
 type rgbMatrix struct {
 	h int
@@ -133,90 +135,61 @@ func getRGBMatrix(filePath string, clip bool) rgbMatrix {
 	return res
 }
 
-func loadCharLib() map[rune][]rgbMatrix {
-	result := make(map[rune][]rgbMatrix)
-	var m rgbMatrix
-	m = getRGBMatrix("./charlib/iphone7.-.strong.png", true)
-	result['-'] = append(result['-'], m)
-	m = getRGBMatrix("./charlib/iphone7.-.small.png", true)
-	result['-'] = append(result['-'], m)
-	m = getRGBMatrix("./charlib/iphone7.-.strong.2.png", true)
-	result['-'] = append(result['-'], m)
-	m = getRGBMatrix("./charlib/iphone7.-.small.zhifubao.png", true)
-	result['-'] = append(result['-'], m)
-	
-	m = getRGBMatrix("./charlib/iphone7.+.strong.png", true)
-	result['+'] = append(result['+'], m)
-	
-	m = getRGBMatrix("./charlib/iphone7.p.strong.png", true)
-	result['.'] = append(result['.'], m)
-	m = getRGBMatrix("./charlib/iphoneMax.p.strong.1.png", true)
-	result['.'] = append(result['.'], m)
-	
-	m = getRGBMatrix("./charlib/iphone7.0.strong.png", true)
-	result['0'] = append(result['0'], m)
-	m = getRGBMatrix("./charlib/iphone7.0.small.png", true)
-	result['0'] = append(result['0'], m)
-	m = getRGBMatrix("./charlib/iphone7.0.small.1.png", true)
-	result['0'] = append(result['0'], m)
-	
-	m = getRGBMatrix("./charlib/iphone7.1.strong.png", true)
-	result['1'] = append(result['1'], m)
-	m = getRGBMatrix("./charlib/iphone7.1.small.png", true)
-	result['1'] = append(result['1'], m)
-	
-	m = getRGBMatrix("./charlib/iphone7.2.strong.png", true)
-	result['2'] = append(result['2'], m)
-	m = getRGBMatrix("./charlib/iphone7.2.small.png", true)
-	result['2'] = append(result['2'], m)
-	
-	m = getRGBMatrix("./charlib/iphone7.3.strong.png", true)
-	result['3'] = append(result['3'], m)
-	m = getRGBMatrix("./charlib/iphoneMax.3.strong.1.png", true)
-	result['3'] = append(result['3'], m)
-	m = getRGBMatrix("./charlib/iphone7.3.small.png", true)
-	result['3'] = append(result['3'], m)
-	
-	m = getRGBMatrix("./charlib/iphone7.4.strong.png", true)
-	result['4'] = append(result['4'], m)
-	m = getRGBMatrix("./charlib/iphone7.4.small.png", true)
-	result['4'] = append(result['4'], m)
-	
-	m = getRGBMatrix("./charlib/iphone7.5.strong.png", true)
-	result['5'] = append(result['5'], m)
-	m = getRGBMatrix("./charlib/iphone7.5.small.png", true)
-	result['5'] = append(result['5'], m)
-	
-	m = getRGBMatrix("./charlib/iphone7.6.strong.png", true)
-	result['6'] = append(result['6'], m)
-	m = getRGBMatrix("./charlib/iphone7.6.strong.1.png", true)
-	result['6'] = append(result['6'], m)
-	m = getRGBMatrix("./charlib/iphone7.6.small.png", true)
-	result['6'] = append(result['6'], m)
-	
-	m = getRGBMatrix("./charlib/iphone7.7.strong.png", true)
-	result['7'] = append(result['7'], m)
-	m = getRGBMatrix("./charlib/iphone7.7.small.png", true)
-	result['7'] = append(result['7'], m)
-	
-	m = getRGBMatrix("./charlib/iphone7.8.strong.png", true)
-	result['8'] = append(result['8'], m)
-	m = getRGBMatrix("./charlib/iphone7.8.small.png", true)
-	result['8'] = append(result['8'], m)
-	
-	m = getRGBMatrix("./charlib/iphone7.9.strong.png", true)
-	result['9'] = append(result['9'], m)
-	m = getRGBMatrix("./charlib/iphone7.9.small.png", true)
-	result['9'] = append(result['9'], m)
-	m = getRGBMatrix("./charlib/iphone7.9.zhifubao.strong.png", true)
-	result['9'] = append(result['9'], m)
-	
-	m = getRGBMatrix("./charlib/iphone7.s.small.png", true)
-	result[':'] = append(result[':'], m)
-	m = getRGBMatrix("./charlib/iphone7.s.strong.zhifubao.png", true)
-	result[':'] = append(result[':'], m)
+func getFileList(path string) []string {
+	var fileList []string
+	err := filepath.Walk(path, func(path string, f os.FileInfo, err error) error {
+		if f == nil {
+			return err
+		}
+		if f.IsDir() {
+			return nil
+		}
+		fileList = append(fileList, path)
+		return nil
+	})
+	if err != nil {
+		fmt.Printf("filepath.Walk() returned %v\n", err)
+	}
+	return fileList
+}
 
-	return result
+func loadCharLib() *map[rune][]rgbMatrix {
+	result := make(map[rune][]rgbMatrix)
+
+	string2char := map[string]rune {
+		"0": '0',
+		"1": '1',
+		"2": '2',
+		"3": '3',
+		"4": '4',
+		"5": '5',
+		"6": '6',
+		"7": '7',
+		"8": '9',
+		"9": '9',
+		"plus": '+',
+		"minus": '-',
+		"colon": ':',
+		"point": '.',
+	}
+	fileList := getFileList("./charlib")
+
+	for _, path := range fileList {
+		tmp := strings.Split(path, "/")
+		id := strings.Split(tmp[len(tmp)-1], ".")[0]
+		fmt.Printf("%v, %v, %c\n", path, id, string2char[id])
+		m := getRGBMatrix(path, true)
+		if charId, ok := string2char[id]; ok {
+			result[charId] = append(result[charId], m)
+		}
+	}
+	
+	//m = getRGBMatrix("./charlib/iphone7.s.small.png", true)
+	//result[':'] = append(result[':'], m)
+	//m = getRGBMatrix("./charlib/iphone7.s.strong.zhifubao.png", true)
+	//result[':'] = append(result[':'], m)
+
+	return &result
 }
 
 func needSkip(x, y int, mark [][]int) bool {
@@ -290,11 +263,11 @@ func calDistance(a, b rgbMatrix) float64 {
 	return c
 }
 
-func tryMatch(matrix rgbMatrix, charMap map[rune][]rgbMatrix) (rune, float64, int, int) {
+func tryMatch(matrix rgbMatrix, charMap *map[rune][]rgbMatrix) (rune, float64, int, int) {
 	var res rune
 	var dis float64 = 0.1
 	var h, w int
-	for char, matrixList := range charMap {
+	for char, matrixList := range *charMap {
 		for _, m := range matrixList {
 			tmpdis := calDistance(matrix, m)
 			if tmpdis > dis || dis > 0.01 {
@@ -318,7 +291,7 @@ type Message struct {
 }
 
 
-var charMap map[rune][]rgbMatrix
+var charMap *map[rune][]rgbMatrix
 func init() {
 	charMap = loadCharLib()
 }
@@ -746,6 +719,11 @@ func (this *workStatusManager) getContent(msg Message) string {
 	return content
 }
 
+func updateCharLib(w http.ResponseWriter, r *http.Request) {
+	charMap = loadCharLib()
+	fmt.Fprintf(w, "ok")
+}
+
 func waitingMessage(w http.ResponseWriter, r *http.Request) {
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
@@ -802,5 +780,11 @@ func main(){
 	//return
 	InitDB()
 	http.HandleFunc("/hellonebula", waitingMessage)
-	http.ListenAndServe(":80", nil)
+	http.HandleFunc("/charlib/update", updateCharLib)
+	http.HandleFunc("/charlib/get", getCharLib)
+	http.HandleFunc("/charlib/put", putCharLib)
+
+	http.Handle("/", http.StripPrefix("", http.FileServer(http.Dir("./nebula-ui/dist/"))))
+	http.Handle("/static/", http.StripPrefix("", http.FileServer(http.Dir("./nebula-ui/dist/"))))
+	fmt.Println(http.ListenAndServe(":80", nil))
 }
