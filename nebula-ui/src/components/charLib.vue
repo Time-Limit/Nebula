@@ -2,13 +2,15 @@
   <div class="charLib">
     <Button @click="getCharLib">展示charLib</Button>
     <div v-for="value in charLibData">
-      <pre>{{value.id}}</pre>
-      <img :src="value.imgUrl"><img>
+      <h1>{{value.Id}}</h1>
+      <img :src="value.ImgUrl"/>
+      <hr>
     </div>
   </div>
 </template>
 
 <script>
+import Ajax from '../ajax'
 export default {
   name: 'charLib',
 
@@ -20,11 +22,16 @@ export default {
 
   methods: {
     getCharLib: function () {
-      this.$http.get('api/charlib').then((response) => {
-         console.info(response.body)
-      }, (response) => {
-         console.error(response)
-      });
+      let _this = this
+      Ajax({
+        method: 'GET',
+        url: '/api/charlib'
+      }).then((res) => {
+        _this.charLibData = res.data.DataList
+        console.log(_this.charLibData)
+      }, (error) => {
+        console.log('error', '获取图片库失败: ' + error)
+      })
     }
   }
 }

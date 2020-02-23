@@ -2,6 +2,7 @@
   <div id="app">
     <Menu mode="horizontal" theme="light" @on-select="changeRoute">
       <MenuItem name="stroke"> <Icon type="ios-paper" />笔画</MenuItem>
+      <MenuItem name="charLib"> <Icon type="ios-paper" />图片库</MenuItem>
     </Menu>
     <router-view/>
   </div>
@@ -9,6 +10,7 @@
 
 <script>
 import Stroke from '@/components/stroke'
+import CharLib from '@/components/charLib'
 export default {
   name: 'App',
   methods: {
@@ -20,11 +22,12 @@ export default {
   data () {
     return {
       routeMap: {
-        'stroke': '/stroke'
+        'stroke': '/stroke',
+        'charLib': '/charlib'
       }
     }
   },
-  components: { Stroke }
+  components: { Stroke, CharLib }
 }
 </script>
 

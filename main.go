@@ -1,27 +1,34 @@
 package main
 
 import (
-	"net/http"
-	"io/ioutil"
-	"github.com/Comdex/imgo"
-	"fmt"
-	"encoding/xml"
-	"time"
-	"os/exec"
-	"sync"
-	"strings"
-	"errors"
-	"strconv"
 	"database/sql"
-	_ "github.com/lib/pq"
-	"regexp"
+	"encoding/xml"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"github.com/Comdex/imgo"
+	"io/ioutil"
+	"net/http"
+	"os"
+	"os/exec"
 	"path/filepath"
-    "os"
+	"regexp"
+	"runtime/debug"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/gorilla/mux"
+	"github.com/sirupsen/logrus"
+	_ "github.com/lib/pq"
 )
+
 type rgbMatrix struct {
-	h int
-	w int
+	h      int
+	w      int
 	matrix [][]uint8
+	filePath string
 }
 
 type matchResult struct {
@@ -51,8 +58,9 @@ func init() {
 }
 
 var typeAlias []string
+
 func init() {
-	typeAlias = []string {
+	typeAlias = []string{
 		"无效",
 		"餐饮",
 		"日用",
@@ -70,7 +78,7 @@ func init() {
 	}
 }
 
-type matchResultList []matchResult 
+type matchResultList []matchResult
 
 func (t matchResultList) Len() int {
 	return len(t)
@@ -85,7 +93,7 @@ func (t matchResultList) Less(i, j int) bool {
 }
 
 func getRGBMatrix(filePath string, clip bool) rgbMatrix {
-	img, err := imgo.DecodeImage(filePath)  // 获取 图片 image.Image 对象
+	img, err := imgo.DecodeImage(filePath) // 获取 图片 image.Image 对象
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -110,7 +118,7 @@ func getRGBMatrix(filePath string, clip bool) rgbMatrix {
 			R = diff(uint8(R))
 			G = diff(uint8(G))
 			B = diff(uint8(B))
-			if int(R) + int(G) + int(B) == 0 {
+			if int(R)+int(G)+int(B) == 0 {
 				matrix[starty][startx] = 0
 			} else {
 				matrix[starty][startx] = 255
@@ -122,15 +130,18 @@ func getRGBMatrix(filePath string, clip bool) rgbMatrix {
 		w = len(matrix[0])
 	}
 
-	res := rgbMatrix {
-		h: h,
-		w: w,
+	res := rgbMatrix{
+		h:      h,
+		w:      w,
 		matrix: matrix,
+		filePath: filePath,
 	}
 
 	if clip {
-		return clipRgbMatrix(res, 0, 0, res.w-1, res.h-1)
+		res = clipRgbMatrix(res, 0, 0, res.w-1, res.h-1)
 	}
+
+	res.filePath = filePath
 
 	return res
 }
@@ -156,38 +167,32 @@ func getFileList(path string) []string {
 func loadCharLib() *map[rune][]rgbMatrix {
 	result := make(map[rune][]rgbMatrix)
 
-	string2char := map[string]rune {
-		"0": '0',
-		"1": '1',
-		"2": '2',
-		"3": '3',
-		"4": '4',
-		"5": '5',
-		"6": '6',
-		"7": '7',
-		"8": '9',
-		"9": '9',
-		"plus": '+',
+	string2char := map[string]rune{
+		"0":     '0',
+		"1":     '1',
+		"2":     '2',
+		"3":     '3',
+		"4":     '4',
+		"5":     '5',
+		"6":     '6',
+		"7":     '7',
+		"8":     '9',
+		"9":     '9',
+		"plus":  '+',
 		"minus": '-',
 		"colon": ':',
 		"point": '.',
 	}
-	fileList := getFileList("./charlib")
+	fileList := getFileList("./file/charlib")
 
 	for _, path := range fileList {
 		tmp := strings.Split(path, "/")
 		id := strings.Split(tmp[len(tmp)-1], ".")[0]
-		fmt.Printf("%v, %v, %c\n", path, id, string2char[id])
 		m := getRGBMatrix(path, true)
 		if charId, ok := string2char[id]; ok {
 			result[charId] = append(result[charId], m)
 		}
 	}
-	
-	//m = getRGBMatrix("./charlib/iphone7.s.small.png", true)
-	//result[':'] = append(result[':'], m)
-	//m = getRGBMatrix("./charlib/iphone7.s.strong.zhifubao.png", true)
-	//result[':'] = append(result[':'], m)
 
 	return &result
 }
@@ -203,8 +208,8 @@ func needSkip(x, y int, mark [][]int) bool {
 
 func extractFeature(a rgbMatrix) [40]float64 {
 	var res [40]float64
-	mw, mh := a.w/5 + 1, a.h/5 + 1
-	getPos := func (i, j, h, w int) int {
+	mw, mh := a.w/5+1, a.h/5+1
+	getPos := func(i, j, h, w int) int {
 		res := i/(h/3+1)*4 + j/(w/4+1)
 		return res
 	}
@@ -212,8 +217,8 @@ func extractFeature(a rgbMatrix) [40]float64 {
 		for j := 0; j < a.w; j++ {
 			if a.matrix[i][j] == 0 {
 				res[i/mh] += 0
-				res[j/mw + 10] += 0
-				res[getPos(i, j, a.h, a.w) + 20] += 1
+				res[j/mw+10] += 0
+				res[getPos(i, j, a.h, a.w)+20] += 1
 			}
 		}
 	}
@@ -258,7 +263,7 @@ func calDistance(a, b rgbMatrix) float64 {
 	fa, fb := extractFeature(a), extractFeature(b)
 	var c float64
 	for i := 0; i < len(fa); i++ {
-		c += (fa[i]-fb[i])*(fb[i]-fa[i])
+		c += (fa[i] - fb[i]) * (fb[i] - fa[i])
 	}
 	return c
 }
@@ -273,7 +278,6 @@ func tryMatch(matrix rgbMatrix, charMap *map[rune][]rgbMatrix) (rune, float64, i
 			if tmpdis > dis || dis > 0.01 {
 				res, dis, h, w = char, tmpdis, m.h, m.w
 			}
-			//fmt.Printf("-%c, %f, %d, %d\n", char, tmpdis, m.h, m.w)
 		}
 	}
 	return res, dis, h, w
@@ -290,8 +294,8 @@ type Message struct {
 	PicUrl       string
 }
 
-
 var charMap *map[rune][]rgbMatrix
+
 func init() {
 	charMap = loadCharLib()
 }
@@ -300,28 +304,26 @@ func isValidChar(m rgbMatrix, L, T, R, B int, x, y int) bool {
 	mark := make(map[int]bool)
 	q := make([][]int, 0)
 	q = append(q, []int{x, y})
-	dx := []int{-1,  0,  1,  0, -1, -1,  1,  1}
-	dy := []int{ 0, -1,  0,  1, -1,  1, -1,  1}
-	//fmt.Println("aaa", m.h, m.w, L, R, T, B)
+	dx := []int{-1, 0, 1, 0, -1, -1, 1, 1}
+	dy := []int{0, -1, 0, 1, -1, 1, -1, 1}
 	for i := 0; i < len(q); i++ {
 		for j := 0; j < 8; j++ {
-			tx, ty := q[i][0] + dx[j], q[i][1] + dy[j]
-			//fmt.Println(tx, ty)
-			if ty < L || ty > R || tx < T || tx > B || m.matrix[tx][ty] != 0 || mark[tx*10000 + ty] == true {
+			tx, ty := q[i][0]+dx[j], q[i][1]+dy[j]
+			if ty < L || ty > R || tx < T || tx > B || m.matrix[tx][ty] != 0 || mark[tx*10000+ty] == true {
 				continue
 			}
 			q = append(q, []int{tx, ty})
-			mark[tx*10000 + ty] = true
+			mark[tx*10000+ty] = true
 		}
 		if len(q) >= 10 {
 			return true
 		}
 	}
-	return false;
+	return false
 }
 
 func clipRgbMatrix(m rgbMatrix, L, T, R, B int) rgbMatrix {
-	getT := func () int {
+	getT := func() int {
 		for i := T; i <= B; i++ {
 			for j := L; j <= R; j++ {
 				if m.matrix[i][j] == 0 && isValidChar(m, L, T, R, B, i, j) {
@@ -331,7 +333,7 @@ func clipRgbMatrix(m rgbMatrix, L, T, R, B int) rgbMatrix {
 		}
 		return -1
 	}
-	getB := func () int {
+	getB := func() int {
 		for i := B; i >= T; i-- {
 			for j := L; j <= R; j++ {
 				if m.matrix[i][j] == 0 && isValidChar(m, L, T, R, B, i, j) {
@@ -341,7 +343,7 @@ func clipRgbMatrix(m rgbMatrix, L, T, R, B int) rgbMatrix {
 		}
 		return -1
 	}
-	getL := func () int {
+	getL := func() int {
 		for j := L; j <= R; j++ {
 			for i := T; i <= B; i++ {
 				if m.matrix[i][j] == 0 && isValidChar(m, L, T, R, B, i, j) {
@@ -351,7 +353,7 @@ func clipRgbMatrix(m rgbMatrix, L, T, R, B int) rgbMatrix {
 		}
 		return -1
 	}
-	getR := func () int {
+	getR := func() int {
 		for j := R; j >= L; j-- {
 			for i := T; i <= B; i++ {
 				if m.matrix[i][j] == 0 && isValidChar(m, L, T, R, B, i, j) {
@@ -393,9 +395,10 @@ func clipRgbMatrix(m rgbMatrix, L, T, R, B int) rgbMatrix {
 	tmp = append(tmp, blank)
 
 	return rgbMatrix{
-		h : b-t+1 + 4,
-		w : r-l+1 + 4,
+		h:      b - t + 1 + 4,
+		w:      r - l + 1 + 4,
 		matrix: tmp,
+		filePath: m.filePath,
 	}
 }
 
@@ -415,35 +418,24 @@ func (this rgbMatrix) Output() {
 
 func extractInfo(image string, T, L, B, R int) string {
 	input := getRGBMatrix(image, false)
-	min := func (l, r int) int {
-		if l < r  {
+	min := func(l, r int) int {
+		if l < r {
 			return l
 		}
 		return r
 	}
-	max := func (l, r int) int {
-		if l > r  {
+	max := func(l, r int) int {
+		if l > r {
 			return l
 		}
 		return r
 	}
 	L = max(0, L)
 	T = max(0, T)
-	R = min(R, input.w - 1)
-	B = min(B, input.h - 1)
+	R = min(R, input.w-1)
+	B = min(B, input.h-1)
 	input = clipRgbMatrix(input, L, T, R, B)
 	L, T, R, B = 0, 0, input.w-1, input.h-1
-	//fmt.Println(input.h, input.w)
-	//for i := T; i <= B; i++ {
-	//	for j := L; j <= R; j++ {
-	//		if input.matrix[i][j] == 255 {
-	//			fmt.Printf("*")
-	//		} else {
-	//			fmt.Printf(".")
-	//		}
-	//	}
-	//	fmt.Println()
-	//}
 	var str string
 	for i, pre := L, 0; i <= R; i++ {
 		flag := false
@@ -453,10 +445,9 @@ func extractInfo(image string, T, L, B, R int) string {
 			}
 		}
 		if flag == false {
-			if pre + 10 < i {
+			if pre+10 < i {
 				part := clipRgbMatrix(input, pre, T, i, B)
 				char, _, _, _ := tryMatch(part, charMap)
-				//fmt.Printf("%c, %v\n", char, dis)
 				str = fmt.Sprintf("%s%c", str, char)
 			}
 			pre = i
@@ -477,11 +468,8 @@ func extractData(imageName string) (float64, time.Time, error) {
 			}
 		}
 		if flag == false {
-			if pre + 10 < i {
+			if pre+10 < i {
 				rect = append(rect, []int{pre, i})
-				//part := clipRgbMatrix(input, L, pre, R, i)
-				//part.Output()
-				//fmt.Println("------------------------")
 			}
 			pre = i
 		}
@@ -505,16 +493,15 @@ func extractData(imageName string) (float64, time.Time, error) {
 				}
 			}
 			if flag == false {
-				if pre + 1 < i {
+				if pre+1 < i {
 					part := clipRgbMatrix(tmp, pre, T, i, B)
 					char, _, _, _ := tryMatch(part, charMap)
 					str = fmt.Sprintf("%s%c", str, char)
-			//		part.Output()
+					//		part.Output()
 				}
 				pre = i
 			}
 		}
-		fmt.Println(str)
 		match, err := regexp.MatchString("^[-+][0-9]+\\.[0-9][0-9]$", str)
 		if err != nil {
 			return money, timeVal, err
@@ -533,7 +520,6 @@ func extractData(imageName string) (float64, time.Time, error) {
 			hour, minute = 0, 0
 
 			stringTime := fmt.Sprintf("%04d-%02d-%02d %02d:%02d:00", year, month, day, hour, minute)
-			//fmt.Println(stringTime)
 			loc, err := time.LoadLocation("Asia/Shanghai")
 			if err != nil {
 				return money, timeVal, err
@@ -549,45 +535,44 @@ func extractData(imageName string) (float64, time.Time, error) {
 			return money, timeVal, nil
 		}
 	}
-	fmt.Println(money, timeVal)
 	return 0.0, time.Time{}, errors.New("not found")
 }
 
 func extractSpecInfo(imageName string, pos int) string {
 	res := []string{}
-	if pos == 0 || pos == 1{
+	if pos == 0 || pos == 1 {
 		str1 := extractInfo(imageName, 370, 200, 500, 500)
 		str1 += "   "
-		str1 +=  extractInfo(imageName, 760, 200, 800, 550)
-		res = append(res, "1 | " + str1)
+		str1 += extractInfo(imageName, 760, 200, 800, 550)
+		res = append(res, "1 | "+str1)
 	}
 
 	if pos == 0 || pos == 2 {
 		str2 := extractInfo(imageName, 220, 100, 320, 600)
 		str2 += "   "
-		str2 +=  extractInfo(imageName, 600, 380, 670, 740)
-		res = append(res, "2 | " + str2)
+		str2 += extractInfo(imageName, 600, 380, 670, 740)
+		res = append(res, "2 | "+str2)
 	}
 
-	if pos == 0  || pos == 3 {
+	if pos == 0 || pos == 3 {
 		str3 := extractInfo(imageName, 410, 200, 550, 900)
 		str3 += "   "
-		str3 +=  extractInfo(imageName, 1090, 740, 1170, 1210) + ":00"
-		res = append(res, "3 | " + str3)
+		str3 += extractInfo(imageName, 1090, 740, 1170, 1210) + ":00"
+		res = append(res, "3 | "+str3)
 	}
 
-	if pos == 0  || pos == 4 {
+	if pos == 0 || pos == 4 {
 		str3 := extractInfo(imageName, 230, 200, 310, 700)
 		str3 += "   "
-		str3 +=  extractInfo(imageName, 820, 450, 880, 730) + ":00"
-		res = append(res, "4 | " + str3)
+		str3 += extractInfo(imageName, 820, 450, 880, 730) + ":00"
+		res = append(res, "4 | "+str3)
 	}
 
 	return strings.Join(res, "\n")
 }
 
 func downloadImage(imageName, picUrl string) error {
-	cmd := exec.Command("/bin/bash", "-c", "wget -O " + imageName + " \"" + picUrl + "\"")
+	cmd := exec.Command("/bin/bash", "-c", "wget -O "+imageName+" \""+picUrl+"\"")
 	_, err := cmd.Output()
 	return err
 }
@@ -667,8 +652,7 @@ func (this *workStatusManager) getContent(msg Message) string {
 
 	var content string
 	var err error
-	defer func () {
-		fmt.Println(content, err, curStatus)
+	defer func() {
 		var nextStatus workStatus
 		if err != nil {
 			this.lock.Lock()
@@ -688,13 +672,13 @@ func (this *workStatusManager) getContent(msg Message) string {
 		}
 		if nextStatus == waitingImage {
 			if err == nil {
-				cmd := exec.Command("/bin/bash", "-c", "mv " + msg.FromUserName + " " + fmt.Sprintf("./backup/%v.png", time.Now().UnixNano()))
+				cmd := exec.Command("/bin/bash", "-c", "mv "+msg.FromUserName+" "+fmt.Sprintf("./backup/%v.png", time.Now().UnixNano()))
 				output, err := cmd.Output()
 				if err != nil {
 					fmt.Println(output, err)
 				}
 			} else {
-				cmd := exec.Command("/bin/bash", "-c", "mv " + msg.FromUserName + " " + fmt.Sprintf("./debug/%v.png", time.Now().UnixNano()))
+				cmd := exec.Command("/bin/bash", "-c", "mv "+msg.FromUserName+" "+fmt.Sprintf("./debug/%v.png", time.Now().UnixNano()))
 				output, err := cmd.Output()
 				if err != nil {
 					fmt.Println(output, err)
@@ -703,13 +687,16 @@ func (this *workStatusManager) getContent(msg Message) string {
 		}
 	}()
 	switch curStatus {
-		case waitingImage: {
+	case waitingImage:
+		{
 			content, err = imageHandler(msg)
 		}
-		case waitingComment: {
+	case waitingComment:
+		{
 			content, err = commentHandler(msg)
 		}
-		default: {
+	default:
+		{
 			panic("invalid curStatus")
 		}
 	}
@@ -724,7 +711,36 @@ func updateCharLib(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "ok")
 }
 
-func waitingMessage(w http.ResponseWriter, r *http.Request) {
+type GetCharLibResponse_Data struct {
+	Id string
+	ImgUrl string
+}
+
+type GetCharLibResponse struct {
+	DataList []GetCharLibResponse_Data
+}
+
+func WriteOk(w http.ResponseWriter, v interface{}) {
+	data, _ := json.Marshal(v)
+	w.WriteHeader(200)
+	w.Write(data)
+}
+
+func getCharLib(w http.ResponseWriter, r *http.Request) {
+	var resp GetCharLibResponse
+	tmpCharMap := charMap
+	for k, v := range *tmpCharMap {
+		for _, vv := range v {
+			resp.DataList = append(resp.DataList, GetCharLibResponse_Data{
+				Id: string(k),
+				ImgUrl: "/" + vv.filePath,
+			})
+		}
+	}
+	WriteOk(w, resp)
+}
+
+func helloNebula(w http.ResponseWriter, r *http.Request) {
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		fmt.Println(err)
@@ -772,19 +788,101 @@ func InitDB() {
 		comment text NOT NULL)`)
 }
 
-func main(){
-	//tmp := getRGBMatrix("./backup/1580807029539510230.png", false)
-	//tmp.Output()
-	//m, t, e := extractData("./backup/1580807029539510230.png")
-	//fmt.Println(m, t, e)
-	//return
-	InitDB()
-	http.HandleFunc("/hellonebula", waitingMessage)
-	http.HandleFunc("/charlib/update", updateCharLib)
-	http.HandleFunc("/charlib/get", getCharLib)
-	http.HandleFunc("/charlib/put", putCharLib)
+type Route struct {
+	Name        string
+	Method      string
+	Pattern     string
+	HandlerFunc http.HandlerFunc
+}
 
-	http.Handle("/", http.StripPrefix("", http.FileServer(http.Dir("./nebula-ui/dist/"))))
-	http.Handle("/static/", http.StripPrefix("", http.FileServer(http.Dir("./nebula-ui/dist/"))))
-	fmt.Println(http.ListenAndServe(":80", nil))
+type Routes []Route
+
+var routes = Routes{
+	Route{
+		Name:        "HelloNebula",
+		Method:      "GET",
+		Pattern:     "/hellonebula",
+		HandlerFunc: helloNebula,
+	},
+	Route{
+		Name:        "GetCharLib",
+		Method:      "GET",
+		Pattern:     "/api/charlib",
+		HandlerFunc: getCharLib,
+	},
+}
+
+func createHandler(route Route) http.HandlerFunc {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+
+		logEntry := logrus.WithFields(logrus.Fields{
+			"method":      r.Method,
+			"uri":         r.RequestURI,
+			"name":        route.Name,
+			"startTime":   start.Format(time.RFC3339),
+			"remote-addr": r.RemoteAddr,
+		})
+
+		defer func() {
+			if e := recover(); e != nil {
+				logEntry.WithFields(logrus.Fields{
+					"status":   500,
+					"duration": time.Since(start),
+				}).Error(e, string(debug.Stack()))
+				conn, _, _ := w.(http.Hijacker).Hijack()
+				conn.Close()
+			}
+		}()
+
+		route.HandlerFunc.ServeHTTP(w, r)
+	})
+}
+
+func NewRouter() *mux.Router {
+	router := mux.NewRouter().StrictSlash(true)
+	for _, route := range routes {
+		var path, constraint string
+		if strings.Contains(route.Pattern, "?") {
+			e := strings.SplitN(route.Pattern, "?", 2)
+			path = e[0]
+			constraint = e[1]
+		} else {
+			path = route.Pattern
+		}
+		r := router.Methods(route.Method).
+			Path(path).
+			Name(route.Name).
+			Handler(createHandler(route))
+		if constraint != "" {
+			r.Queries(constraint, "")
+		}
+	}
+	addUIHandlers(router)
+	return router
+}
+
+func addUIHandlers(router *mux.Router) {
+	//http.Handle("/", http.StripPrefix("", http.FileServer(http.Dir("./nebula-ui/dist/"))))
+	//http.Handle("/static/", http.StripPrefix("", http.FileServer(http.Dir("./nebula-ui/dist/"))))
+
+	uiFilePath := "./nebula-ui/dist"
+	uiPrefixPath := "/ui/"
+	fs := http.FileServer(http.Dir(uiFilePath))
+	//router.Methods("GET").PathPrefix("/static").Handler(fs)
+	//router.Methods("GET").PathPrefix("/").Handler(fs)
+	router.Methods("GET").PathPrefix(uiPrefixPath + "static").Handler(http.StripPrefix(uiPrefixPath, fs))
+	router.Methods("GET").PathPrefix(uiPrefixPath).Handler(http.StripPrefix(uiPrefixPath, fs))
+
+	fileFs := http.FileServer(http.Dir("./file/"))
+	router.Methods("GET").PathPrefix("/file/").Handler(http.StripPrefix("/file/", fileFs))
+}
+
+func main() {
+	InitDB()
+
+	route := NewRouter()
+	//http.Handle("/", http.StripPrefix("", http.FileServer(http.Dir("./nebula-ui/dist/"))))
+	//http.Handle("/static/", http.StripPrefix("", http.FileServer(http.Dir("./nebula-ui/dist/"))))
+	fmt.Println(http.ListenAndServe(":8080", route))
 }
