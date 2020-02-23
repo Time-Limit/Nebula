@@ -96,6 +96,7 @@ func getRGBMatrix(filePath string, clip bool) rgbMatrix {
 	img, err := imgo.DecodeImage(filePath) // 获取 图片 image.Image 对象
 	if err != nil {
 		fmt.Println(err)
+		return rgbMatrix{}
 	}
 
 	height := imgo.GetImageHeight(img)
@@ -740,6 +741,30 @@ func getCharLib(w http.ResponseWriter, r *http.Request) {
 	WriteOk(w, resp)
 }
 
+type GetInvalidBillImgResponse_Data struct {
+	ImgUrl string
+	Price float64
+	Time  time.Time
+	Err	  error
+}
+
+type GetInvalidBillImgResponse struct {
+	DataList []GetInvalidBillImgResponse_Data
+}
+
+func getInvalidBillImg(w http.ResponseWriter, r *http.Request) {
+	fileList := getFileList("./file/invalidBillImg")
+	var resp GetInvalidBillImgResponse
+	for _, path := range fileList {
+		fmt.Println(path)
+		var data GetInvalidBillImgResponse_Data
+		data.Price, data.Time, data.Err = extractData(path)
+		data.ImgUrl = "/" + path
+		resp.DataList = append(resp.DataList, data)
+	}
+	WriteOk(w, resp)
+}
+
 func helloNebula(w http.ResponseWriter, r *http.Request) {
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
@@ -809,6 +834,12 @@ var routes = Routes{
 		Method:      "GET",
 		Pattern:     "/api/charlib",
 		HandlerFunc: getCharLib,
+	},
+	Route{
+		Name:        "GetInvalidBillImg",
+		Method:      "GET",
+		Pattern:     "/api/bill/image/invalid",
+		HandlerFunc: getInvalidBillImg,
 	},
 }
 
